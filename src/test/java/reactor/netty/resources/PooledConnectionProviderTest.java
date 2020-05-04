@@ -560,8 +560,10 @@ public class PooledConnectionProviderTest {
 		SslContext ctx = SslContextBuilder.forClient()
 		                                  .sslProvider(SslProvider.JDK)
 		                                  .build();
+
+		ConnectionProvider provider = ConnectionProvider.create("testSslEngineClosed", 1);
 		HttpClient client =
-				HttpClient.create()
+				HttpClient.create(provider)
 				          .port(server.port())
 				          .secure(spec -> spec.sslContext(ctx))
 				          .wiretap(true);
@@ -610,7 +612,7 @@ public class PooledConnectionProviderTest {
 				      .asString();
 
 		StepVerifier.create(response)
-		            .expectErrorMatches(t -> t.getClass().isAssignableFrom(expectedExc) && t.getMessage().startsWith(expectedMsg))
+		            .expectErrorMatches(t -> t.getClass().isAssignableFrom(expectedExc) && t.getMessage().startsWith(expectedMsg)).log()
 		            .verify(Duration.ofSeconds(30));
 	}
 
