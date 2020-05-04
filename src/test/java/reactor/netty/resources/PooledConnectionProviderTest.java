@@ -34,10 +34,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
+import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.ssl.SslContext;
@@ -591,23 +592,14 @@ public class PooledConnectionProviderTest {
 				    tcpClient.bootstrap(
 				        b -> BootstrapHandlers.updateConfiguration(b, "test",
 				            ((o, c) -> {
-				                PooledConnectionProvider.PooledConnectionAllocator.PooledConnectionInitializer initializer =
-				                    c.pipeline().get(PooledConnectionProvider.PooledConnectionAllocator.PooledConnectionInitializer.class);
 				                c.pipeline()
 				                 .addFirst(new ChannelOutboundHandlerAdapter() {
 
 				                     @Override
 				                     public void connect(ChannelHandlerContext ctx, SocketAddress remoteAddress,
-				                             SocketAddress localAddress, ChannelPromise promise) throws Exception {
-				                         if (closeCount.getAndDecrement() > 0) {
-				                             promise.removeListener(initializer)
-				                                    .addListener(ChannelFutureListener.CLOSE)
-				                                    .addListener(initializer);
-				                         }
-				                         else {
-				                             promise.addListener(ChannelFutureListener.CLOSE);
-				                         }
-				                         super.connect(ctx, remoteAddress, localAddress, promise);
+				                         SocketAddress localAddress, ChannelPromise promise) throws Exception {
+				                             super.connect(ctx, remoteAddress, localAddress,
+				                                 new TestPromise(ctx.channel(), promise, closeCount));
 				                     }
 				                 });
 				            }))))
@@ -652,6 +644,35 @@ public class PooledConnectionProviderTest {
 		@Override
 		public PoolMetrics metrics() {
 			return null;
+		}
+	}
+
+	static final class TestPromise extends DefaultChannelPromise {
+
+		final ChannelPromise parent;
+		final AtomicInteger closeCount;
+
+		public TestPromise(Channel channel, ChannelPromise parent, AtomicInteger closeCount) {
+			super(channel);
+			this.parent = parent;
+			this.closeCount = closeCount;
+		}
+
+		@Override
+		@SuppressWarnings("FutureReturnValueIgnored")
+		public boolean trySuccess(Void result) {
+			boolean r;
+			if (closeCount.getAndDecrement() > 0) {
+				// FutureReturnValueIgnored is deliberate
+				channel().close();
+				r = parent.trySuccess(result);
+			}
+			else {
+				r = parent.trySuccess(result);
+				// FutureReturnValueIgnored is deliberate
+				channel().close();
+			}
+			return r;
 		}
 	}
 }
